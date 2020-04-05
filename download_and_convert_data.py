@@ -93,7 +93,7 @@ def main(_):
   elif FLAGS.dataset_name == 'visualwakewords':
     download_and_convert_visualwakewords.run(
         FLAGS.dataset_dir, FLAGS.small_object_area_threshold,
-        FLAGS.foreground_class_of_interest, FLAGS.download)
+        FLAGS.foreground_class_of_interest, FLAGS.download, FLAGS.coco_dir)
   else:
     raise ValueError(
         'dataset_name [%s] was not recognized.' % FLAGS.dataset_name)

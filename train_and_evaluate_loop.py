@@ -18,9 +18,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import math
 import tensorflow as tf
 from tensorflow.contrib import quantize as contrib_quantize
 from tensorflow.contrib import slim as contrib_slim
+from tensorflow.contrib.slim.python.slim.learning import train_step
 
 from datasets import dataset_factory
 from deployment import model_deploy
@@ -34,6 +36,11 @@ tf.app.flags.DEFINE_string(
 
 tf.app.flags.DEFINE_string(
     'train_dir', '/tmp/tfmodel/',
+    'Directory where checkpoints and event logs are written to.')
+
+
+tf.app.flags.DEFINE_string(
+    'eval_dir', '/tmp/tfmodel/eval',
     'Directory where checkpoints and event logs are written to.')
 
 tf.app.flags.DEFINE_integer('num_clones', 1,
@@ -61,7 +68,11 @@ tf.app.flags.DEFINE_integer(
     'The number of threads used to create the batches.')
 
 tf.app.flags.DEFINE_integer(
-    'log_every_n_steps', 10,
+    'log_every_n_steps', 200,
+    'The frequency with which logs are print.')
+
+tf.app.flags.DEFINE_integer(
+    'validation_every_n_step', 10000,
     'The frequency with which logs are print.')
 
 tf.app.flags.DEFINE_integer(
@@ -234,6 +245,68 @@ tf.app.flags.DEFINE_boolean(
     'When restoring a checkpoint would ignore missing variables.')
 
 FLAGS = tf.app.flags.FLAGS
+
+def accuracy_validation(network_fn, dataset, image_preprocessing_fn):
+
+  provider = slim.dataset_data_provider.DatasetDataProvider(
+                                        dataset,
+                                        shuffle=False,
+                                        common_queue_capacity=2 * FLAGS.batch_size,
+                                        common_queue_min=FLAGS.batch_size)
+
+  [image, label] = provider.get(['image', 'label'])
+  label -= FLAGS.labels_offset
+
+  eval_image_size = FLAGS.train_image_size or network_fn.default_image_size
+  image = image_preprocessing_fn(image, eval_image_size, eval_image_size)
+
+  images, labels = tf.train.batch(
+      [image, label],
+      batch_size=FLAGS.batch_size,
+      num_threads=FLAGS.num_preprocessing_threads,
+      capacity=5 * FLAGS.batch_size)
+
+  ####################
+  # Define the model #
+  ####################
+  logits, _ = network_fn(images)
+
+  variables_to_restore = slim.get_variables_to_restore()
+
+  predictions = tf.argmax(logits, 1)
+  labels = tf.squeeze(labels)
+
+  # Define the metrics:
+  names_to_values, names_to_updates = slim.metrics.aggregate_metric_map({
+      'Accuracy': slim.metrics.streaming_accuracy(predictions, labels),
+      'Recall_5': slim.metrics.streaming_recall_at_k(logits, labels, 5),
+      'false positives:': slim.metrics.streaming_false_positives(predictions, labels),
+      'false negatives:': slim.metrics.streaming_false_negatives(predictions, labels),
+  })
+
+  # Print the summaries to screen.
+  for name, value in names_to_values.items():
+    summary_name = 'eval/%s' % name
+    op = tf.summary.scalar(summary_name, value, collections=[])
+    op = tf.Print(op, [value], summary_name)
+    tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
+
+  # This ensures that we make a single pass over all of the data.
+  num_batches = math.ceil(dataset.num_samples / float(FLAGS.batch_size))
+
+  checkpoint_path = tf.train.latest_checkpoint(FLAGS.train_dir)
+
+  tf.logging.info('Evaluating %s' % checkpoint_path)
+
+  metric_values = slim.evaluation.evaluate_once(
+      master=FLAGS.master,
+      checkpoint_path=checkpoint_path,
+      logdir=FLAGS.eval_dir,
+      num_evals=num_batches,
+      eval_op=list(names_to_updates.values()),
+      variables_to_restore=variables_to_restore)
+
+  return
 
 
 def _configure_learning_rate(num_samples_per_epoch, global_step):
@@ -423,6 +496,9 @@ def main(_):
     dataset = dataset_factory.get_dataset(
         FLAGS.dataset_name, FLAGS.dataset_split_name, FLAGS.dataset_dir)
 
+    dataset_val = dataset_factory.get_dataset(
+        FLAGS.dataset_name, 'val', FLAGS.dataset_dir)
+
     ######################
     # Select the network #
     ######################
@@ -432,6 +508,11 @@ def main(_):
         weight_decay=FLAGS.weight_decay,
         is_training=True)
 
+    network_fn_eval = nets_factory.get_network_fn(
+        FLAGS.model_name,
+        num_classes=(dataset.num_classes - FLAGS.labels_offset),
+        is_training=False)
+
     #####################################
     # Select the preprocessing function #
     #####################################
@@ -439,6 +520,12 @@ def main(_):
     image_preprocessing_fn = preprocessing_factory.get_preprocessing(
         preprocessing_name,
         is_training=True,
+        use_grayscale=FLAGS.use_grayscale)
+
+    image_preprocessing_fn_eval = preprocessing_factory.get_preprocessing(
+        preprocessing_name,
+        is_training=False,
+        crop_image=False,
         use_grayscale=FLAGS.use_grayscale)
 
     ##############################################################
@@ -453,19 +540,34 @@ def main(_):
       [image, label] = provider.get(['image', 'label'])
       label -= FLAGS.labels_offset
 
+      provider_val = slim.dataset_data_provider.DatasetDataProvider(
+          dataset_val,
+          num_readers=FLAGS.num_readers,
+          common_queue_capacity=200 * FLAGS.batch_size,
+          common_queue_min=100 * FLAGS.batch_size)
+      [image_val, label_val] = provider_val.get(['image', 'label'])
+      label_val -= FLAGS.labels_offset
+
       train_image_size = FLAGS.train_image_size or network_fn.default_image_size
 
       image = image_preprocessing_fn(image, train_image_size, train_image_size)
+      image_val = image_preprocessing_fn_eval(image_val, train_image_size, train_image_size)
 
       images, labels = tf.train.batch(
           [image, label],
           batch_size=FLAGS.batch_size,
           num_threads=FLAGS.num_preprocessing_threads,
           capacity=5 * FLAGS.batch_size)
-      labels = slim.one_hot_encoding(
-          labels, dataset.num_classes - FLAGS.labels_offset)
-      batch_queue = slim.prefetch_queue.prefetch_queue(
-          [images, labels], capacity=2 * deploy_config.num_clones)
+      labels = slim.one_hot_encoding(labels, dataset.num_classes - FLAGS.labels_offset)
+      batch_queue = slim.prefetch_queue.prefetch_queue([images, labels], capacity=2 * deploy_config.num_clones)
+
+      images_val, labels_val = tf.train.batch(
+          [image_val, label_val],
+          batch_size=FLAGS.batch_size,
+          num_threads=FLAGS.num_preprocessing_threads,
+          capacity=500 * FLAGS.batch_size)
+      labels_val = slim.one_hot_encoding(labels_val, dataset.num_classes - FLAGS.labels_offset)
+      batch_queue_val = slim.prefetch_queue.prefetch_queue([images_val, labels_val], capacity=2 * deploy_config.num_clones)
 
     ####################
     # Define the model #
@@ -473,7 +575,12 @@ def main(_):
     def clone_fn(batch_queue):
       """Allows data parallelism by creating multiple clones of network_fn."""
       images, labels = batch_queue.dequeue()
-      logits, end_points = network_fn(images)
+      images_val, labels_val = batch_queue_val.dequeue()
+
+      with tf.variable_scope("network_fn") as scope:
+        logits, end_points = network_fn(images)
+        scope.reuse_variables()
+        logits_val, end_points_val = network_fn_eval(images_val)
 
       #############################
       # Specify the loss function #
@@ -485,7 +592,7 @@ def main(_):
             scope='aux_loss')
       slim.losses.softmax_cross_entropy(
           logits, labels, label_smoothing=FLAGS.label_smoothing, weights=1.0)
-      return end_points
+      return end_points, logits_val
 
     # Gather initial summaries.
     summaries = set(tf.get_collection(tf.GraphKeys.SUMMARIES))
@@ -497,7 +604,7 @@ def main(_):
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS, first_clone_scope)
 
     # Add summaries for end_points.
-    end_points = clones[0].outputs
+    end_points, logits_val = clones[0].outputs
     for end_point in end_points:
       x = end_points[end_point]
       summaries.add(tf.summary.histogram('activations/' + end_point, x))
@@ -575,11 +682,27 @@ def main(_):
     # Merge all summaries together.
     summary_op = tf.summary.merge(list(summaries), name='summary_op')
 
+    accuracy_validation = slim.metrics.accuracy(tf.to_int32(tf.argmax(logits_val, 1)), tf.to_int32(tf.argmax(labels_val, 1)))
+
+    def train_step_fn(session, *args, **kwargs):
+      total_loss, should_stop = slim.learning.train_step(session, *args, **kwargs)
+
+      if train_step_fn.step % FLAGS.validation_every_n_step == 0:
+        accuracy = session.run(train_step_fn.accuracy_validation)
+        print('Step %s - Loss: %.2f Accuracy: %.2f%%' % (str(train_step_fn.step).rjust(6, '0'), total_loss, accuracy * 100))
+
+      train_step_fn.step += 1
+      return [total_loss, should_stop]
+
+    train_step_fn.step = 0
+    train_step_fn.accuracy_validation = accuracy_validation
+
     ###########################
     # Kicks off the training. #
     ###########################
     slim.learning.train(
         train_tensor,
+        train_step_fn=train_step_fn,
         logdir=FLAGS.train_dir,
         master=FLAGS.master,
         is_chief=(FLAGS.task == 0),
