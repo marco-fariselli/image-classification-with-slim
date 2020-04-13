@@ -543,8 +543,8 @@ def main(_):
       provider_val = slim.dataset_data_provider.DatasetDataProvider(
           dataset_val,
           num_readers=FLAGS.num_readers,
-          common_queue_capacity=200 * FLAGS.batch_size,
-          common_queue_min=100 * FLAGS.batch_size)
+          common_queue_capacity=20 * FLAGS.batch_size,
+          common_queue_min=10 * FLAGS.batch_size)
       [image_val, label_val] = provider_val.get(['image', 'label'])
       label_val -= FLAGS.labels_offset
 
@@ -565,7 +565,7 @@ def main(_):
           [image_val, label_val],
           batch_size=FLAGS.batch_size,
           num_threads=FLAGS.num_preprocessing_threads,
-          capacity=500 * FLAGS.batch_size)
+          capacity=5 * FLAGS.batch_size)
       labels_val = slim.one_hot_encoding(labels_val, dataset.num_classes - FLAGS.labels_offset)
       batch_queue_val = slim.prefetch_queue.prefetch_queue([images_val, labels_val], capacity=2 * deploy_config.num_clones)
 
@@ -674,6 +674,32 @@ def main(_):
     with tf.control_dependencies([update_op]):
       train_tensor = tf.identity(total_loss, name='train_op')
 
+    accuracy_validation = slim.metrics.accuracy(tf.to_int32(tf.argmax(logits_val, 1)), tf.to_int32(tf.argmax(labels_val, 1)))
+    summaries.add(tf.summary.scalar('eval_accuracy', accuracy_validation))
+    print(accuracy_validation)
+
+    validation_steps = math.ceil(dataset_val.num_samples / FLAGS.batch_size)
+    val_summary_writer = tf.summary.FileWriter(FLAGS.eval_dir)
+
+    def train_step_fn(session, *args, **kwargs):
+      total_loss, should_stop = slim.learning.train_step(session, *args, **kwargs)
+
+      if train_step_fn.step % FLAGS.validation_every_n_step == 0:
+        print('Validating on the entire dataset_val ...')
+        accuracy = 0
+        for i in range(validation_steps):
+          accuracy += session.run(train_step_fn.accuracy_validation)
+        accuracy_validation = accuracy / validation_steps
+        
+        print('Step %s - Loss: %.2f Accuracy: %.2f%%' % (str(train_step_fn.step).rjust(6, '0'), total_loss, accuracy_validation * 100))
+
+      train_step_fn.step += 1
+      return [total_loss, should_stop]
+
+    train_step_fn.step = 0
+    train_step_fn.accuracy_validation = accuracy_validation
+
+
     # Add the summaries from the first clone. These contain the summaries
     # created by model_fn and either optimize_clones() or _gather_clone_loss().
     summaries |= set(tf.get_collection(tf.GraphKeys.SUMMARIES,
@@ -681,21 +707,6 @@ def main(_):
 
     # Merge all summaries together.
     summary_op = tf.summary.merge(list(summaries), name='summary_op')
-
-    accuracy_validation = slim.metrics.accuracy(tf.to_int32(tf.argmax(logits_val, 1)), tf.to_int32(tf.argmax(labels_val, 1)))
-
-    def train_step_fn(session, *args, **kwargs):
-      total_loss, should_stop = slim.learning.train_step(session, *args, **kwargs)
-
-      if train_step_fn.step % FLAGS.validation_every_n_step == 0:
-        accuracy = session.run(train_step_fn.accuracy_validation)
-        print('Step %s - Loss: %.2f Accuracy: %.2f%%' % (str(train_step_fn.step).rjust(6, '0'), total_loss, accuracy * 100))
-
-      train_step_fn.step += 1
-      return [total_loss, should_stop]
-
-    train_step_fn.step = 0
-    train_step_fn.accuracy_validation = accuracy_validation
 
     ###########################
     # Kicks off the training. #

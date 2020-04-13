@@ -109,6 +109,7 @@ def create_visual_wakeword_annotations(annotations_file,
     groundtruth_data = json.load(fid)
     images = groundtruth_data['images']
     # Create category index
+    # category_index = {'id': category_name, ...}
     category_index = {}
     for category in groundtruth_data['categories']:
       if category['name'] in foreground_class_of_interest:

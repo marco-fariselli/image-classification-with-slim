@@ -1,2 +1,9 @@
+.gitignore
+MOBILENET_V1
+__pycache__
 vww_*
-visualwakewords*
+visualwakewords_person
+visualwakewords_vehicle
+coco
+provesh.sh
+.ipynb_checkpoints
