@@ -146,7 +146,8 @@ def main(_):
     network_fn(placeholder)
 
     if FLAGS.quantize:
-      contrib_quantize.create_eval_graph()
+      #contrib_quantize.create_eval_graph()
+      contrib_quantize.experimental_create_eval_graph(symmetric=True, weight_bits=8, activation_bits=8)
 
     graph_def = graph.as_graph_def()
     if FLAGS.write_text_graphdef:

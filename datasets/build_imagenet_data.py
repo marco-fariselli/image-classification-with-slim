@@ -95,6 +95,7 @@ import threading
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
+from PIL import Image
 
 
 tf.app.flags.DEFINE_string('train_directory', '/tmp/',
@@ -172,6 +173,9 @@ def _float_feature(value):
 
 def _bytes_feature(value):
   """Wrapper for inserting bytes features into Example proto."""
+  """Returns a bytes_list from a string / byte."""
+  if isinstance(value, type(tf.constant(0))):
+    value = value.numpy() # BytesList won't unpack a string from an EagerTensor.
   return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
@@ -203,9 +207,12 @@ def _convert_to_example(filename, image_buffer, label, synset, human, bbox,
     [l.append(point) for l, point in zip([xmin, ymin, xmax, ymax], b)]
     # pylint: enable=expression-not-assigned
 
-  colorspace = 'RGB'
+  colorspace = b'RGB'
   channels = 3
-  image_format = 'JPEG'
+  image_format = b'JPEG'
+  synset = bytes(synset, 'utf-8')
+  human = bytes(human, 'utf-8')
+  filename = bytes(os.path.basename(filename), 'utf-8')
 
   example = tf.train.Example(features=tf.train.Features(feature={
       'image/height': _int64_feature(height),
@@ -221,7 +228,7 @@ def _convert_to_example(filename, image_buffer, label, synset, human, bbox,
       'image/object/bbox/ymax': _float_feature(ymax),
       'image/object/bbox/label': _int64_feature([label] * len(xmin)),
       'image/format': _bytes_feature(image_format),
-      'image/filename': _bytes_feature(os.path.basename(filename)),
+      'image/filename': _bytes_feature(filename),
       'image/encoded': _bytes_feature(image_buffer)}))
   return example
 
@@ -314,26 +321,27 @@ def _process_image(filename, coder):
     width: integer, image width in pixels.
   """
   # Read the image file.
-  image_data = tf.gfile.GFile(filename, 'r').read()
+  image_data = tf.gfile.GFile(filename, 'rb').read()
+  image = Image.open(filename).convert('RGB')
 
   # Clean the dirty data.
-  if _is_png(filename):
-    # 1 image is a PNG.
-    print('Converting PNG to JPEG for %s' % filename)
-    image_data = coder.png_to_jpeg(image_data)
-  elif _is_cmyk(filename):
-    # 22 JPEG images are in CMYK colorspace.
-    print('Converting CMYK to RGB for %s' % filename)
-    image_data = coder.cmyk_to_rgb(image_data)
+  #if _is_png(filename):
+  #  # 1 image is a PNG.
+  #  print('Converting PNG to JPEG for %s' % filename)
+  #  image_data = coder.png_to_jpeg(image_data)
+  #elif _is_cmyk(filename):
+  #  # 22 JPEG images are in CMYK colorspace.
+  #  print('Converting CMYK to RGB for %s' % filename)
+  #  image_data = coder.cmyk_to_rgb(image_data)
 
   # Decode the RGB JPEG.
-  image = coder.decode_jpeg(image_data)
+  #image = coder.decode_jpeg(image_data)
 
   # Check that image converted to RGB
-  assert len(image.shape) == 3
-  height = image.shape[0]
-  width = image.shape[1]
-  assert image.shape[2] == 3
+  height = image.size[0]
+  width = image.size[1]
+  #print(image.mode)
+  assert image.mode == 'RGB'
 
   return image_data, height, width
 
@@ -525,7 +533,7 @@ def _find_image_files(data_dir, labels_file):
   # Shuffle the ordering of all image files in order to guarantee
   # random ordering of the images with respect to label in the
   # saved TFRecord files. Make the randomization repeatable.
-  shuffled_index = range(len(filenames))
+  shuffled_index = [i for i in range(len(filenames))]
   random.seed(12345)
   random.shuffle(shuffled_index)
 
@@ -697,8 +705,8 @@ def main(unused_argv):
   # Run it!
   _process_dataset('validation', FLAGS.validation_directory,
                    FLAGS.validation_shards, synset_to_human, image_to_bboxes)
-  _process_dataset('train', FLAGS.train_directory, FLAGS.train_shards,
-                   synset_to_human, image_to_bboxes)
+  #_process_dataset('train', FLAGS.train_directory, FLAGS.train_shards,
+  #                 synset_to_human, image_to_bboxes)
 
 
 if __name__ == '__main__':

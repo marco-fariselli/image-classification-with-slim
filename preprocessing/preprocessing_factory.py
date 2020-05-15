@@ -57,6 +57,7 @@ def get_preprocessing(name, is_training=False, use_grayscale=False, **kwargs):
       'mobilenet_v2': inception_preprocessing,
       'mobilenet_v2_035': inception_preprocessing,
       'mobilenet_v2_140': inception_preprocessing,
+      'mobilenet_v3': inception_preprocessing,
       'nasnet_mobile': inception_preprocessing,
       'nasnet_large': inception_preprocessing,
       'pnasnet_mobile': inception_preprocessing,

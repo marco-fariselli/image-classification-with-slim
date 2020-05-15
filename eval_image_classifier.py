@@ -149,8 +149,8 @@ def main(_):
     logits, _ = network_fn(images)
 
     if FLAGS.quantize:
-      contrib_quantize.create_eval_graph()
-      #contrib_quantize.experimental_create_eval_graph(symmetric=True, weight_bits=8, activation_bits=8)#, quant_delay=FLAGS.quantize_delay)
+      #contrib_quantize.create_eval_graph()
+      contrib_quantize.experimental_create_eval_graph(symmetric=True, weight_bits=8, activation_bits=8)#, quant_delay=FLAGS.quantize_delay)
 
     if FLAGS.moving_average_decay:
       variable_averages = tf.train.ExponentialMovingAverage(
@@ -169,10 +169,10 @@ def main(_):
         'Accuracy': slim.metrics.streaming_accuracy(predictions, labels),
         'Recall_1': slim.metrics.streaming_recall_at_k(logits, labels, 1),
         'precision': slim.metrics.streaming_precision(predictions, labels),
-        'false positives:': slim.metrics.streaming_false_positives(predictions, labels),
-        'true positives': slim.metrics.streaming_true_positives(predictions, labels),
-        'false negatives:': slim.metrics.streaming_false_negatives(predictions, labels),
-        'true negatives': slim.metrics.streaming_true_negatives(predictions, labels),
+        'false_positives:': slim.metrics.streaming_false_positives(predictions, labels),
+        'true_positives': slim.metrics.streaming_true_positives(predictions, labels),
+        'false_negatives:': slim.metrics.streaming_false_negatives(predictions, labels),
+        'true_negatives': slim.metrics.streaming_true_negatives(predictions, labels),
     })
 
     # Print the summaries to screen.

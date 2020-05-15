@@ -61,7 +61,7 @@ tf.app.flags.DEFINE_integer(
     'The number of threads used to create the batches.')
 
 tf.app.flags.DEFINE_integer(
-    'log_every_n_steps', 10,
+    'log_every_n_steps', 100,
     'The frequency with which logs are print.')
 
 tf.app.flags.DEFINE_integer(
@@ -130,6 +130,16 @@ tf.app.flags.DEFINE_integer(
     'quantize_delay', -1,
     'Number of steps to start quantized training. Set to -1 would disable '
     'quantized training.')
+
+tf.app.flags.DEFINE_boolean('quantize_sym', True,
+                            'Symmetric quantize or not')
+
+tf.app.flags.DEFINE_integer(
+    'freeze_bn_delay', None,
+    'Number of steps after which moving mean and variance are'
+    'frozen and used instead of batch statistics during training'
+    'freeze_bn_delay should be greater than quant_delay and should correspond'
+    'to the number of steps when training has almost converged')
 
 #######################
 # Learning Rate Flags #
@@ -475,6 +485,9 @@ def main(_):
       images, labels = batch_queue.dequeue()
       logits, end_points = network_fn(images)
 
+      #loss_weights = tf.constant([0.2, 0, 0, 0.8], shape=[2, 2])
+      #loss_weights = tf.linalg.matmul(labels, loss_weights)
+      #loss_weights = tf.reduce_sum(loss_weights, 1)
       #############################
       # Specify the loss function #
       #############################
@@ -523,8 +536,12 @@ def main(_):
       moving_average_variables, variable_averages = None, None
 
     if FLAGS.quantize_delay >= 0:
-      contrib_quantize.create_training_graph(quant_delay=FLAGS.quantize_delay)
-      #contrib_quantize.experimental_create_training_graph(symmetric=True, weight_bits=8, activation_bits=8, quant_delay=FLAGS.quantize_delay)
+      #contrib_quantize.create_training_graph(quant_delay=FLAGS.quantize_delay)
+      contrib_quantize.experimental_create_training_graph(symmetric=FLAGS.quantize_sym,
+                                                          weight_bits=8,
+                                                          activation_bits=8,
+                                                          quant_delay=FLAGS.quantize_delay,
+                                                          freeze_bn_delay=FLAGS.freeze_bn_delay)
 
     #########################################
     # Configure the optimization procedure. #
