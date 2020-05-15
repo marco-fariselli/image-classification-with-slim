@@ -1,9 +1,14 @@
 .gitignore
 MOBILENET_V1
+MOBV*
 __pycache__
 vww_*
 visualwakewords_person
+visualwakewords_person_5per*
 visualwakewords_vehicle
 coco
 provesh.sh
 .ipynb_checkpoints
+mobilenet_v2*
+quant_experiments
+imagenet_pretrained_ckpts
