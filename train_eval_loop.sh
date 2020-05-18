@@ -35,11 +35,11 @@ IMAGE_SIZE=${IMAGE_SIZE:=224}
 #DATASET
 DATASET="visualwakewords"
 DATASET_DIR="visualwakewords_vehicle"
-#DATASET='imagenet'
-#DATASET_DIR="/home/fariselli/Dataset/imagenet-tf"
+VAL_SPLIT="val"
+
 DATASET_FLAGS="--dataset_name=${DATASET} --dataset_dir=${DATASET_DIR}"
 
-TRAIN_DIR="${MODEL}/${DATASET_DIR}/train_dir_imsize96"
+TRAIN_DIR="${MODEL}/${DATASET}/train_dir"
 
 EVAL_DIR="${TRAIN_DIR}/eval"
 
@@ -70,7 +70,7 @@ do
 	#echo ${TRAIN_FLAGS}
 	CUDA_VISIBLE_DEVICES=${CUDA} ${PYT} -W ignore train_image_classifier.py --train_dir=${TRAIN_DIR} ${TRAIN_FLAGS} --train_image_size=${IMAGE_SIZE} --max_number_of_steps=${NUM_STEPS} ${DATASET_FLAGS} --dataset_split_name="train"  --model_name=${MODEL} ${USE_GRAYSCALE} --preprocessing_name=mobilenet_v1 --quantize_delay=${QUANT_DELAY} ${FROM_CKPT}
 	#echo -e "${RED}${FROM_CKPT}${NC}"
-	CUDA_VISIBLE_DEVICES=${CUDA} ${PYT} -W ignore eval_image_classifier.py --eval_dir=${EVAL_DIR} --eval_image_size=${IMAGE_SIZE} --checkpoint_path=${TRAIN_DIR} ${DATASET_FLAGS} --dataset_split_name="val" --model_name=${MODEL} ${USE_GRAYSCALE} --preprocessing_name=mobilenet_v1 ${QUANT}
+	CUDA_VISIBLE_DEVICES=${CUDA} ${PYT} -W ignore eval_image_classifier.py --eval_dir=${EVAL_DIR} --eval_image_size=${IMAGE_SIZE} --checkpoint_path=${TRAIN_DIR} ${DATASET_FLAGS} --dataset_split_name=${VAL_SPLIT} --model_name=${MODEL} ${USE_GRAYSCALE} --preprocessing_name=mobilenet_v1 ${QUANT}
 done
 
 #${PYT} export_inference_graph.py --model_name=${MODEL} --output_file="${MODEL}/${MODEL}_inference.pb" --input_size=224 --use_grayscale --dataset_name=${DATASET}

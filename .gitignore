@@ -10,5 +10,6 @@ coco
 provesh.sh
 .ipynb_checkpoints
 mobilenet_v2*
+nasnet_mobile
 quant_experiments
 imagenet_pretrained_ckpts
